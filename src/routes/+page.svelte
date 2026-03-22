@@ -122,12 +122,11 @@
       ];
 
       const taskId = data.taskId;
-      statusText = `⏳ Task submitted to **${selectedProfile}**`;
+      statusText = `<span class="text-muted-foreground">⏳ Task submitted to</span> <strong class="text-foreground">${selectedProfile}</strong>`;
       const startTime = Date.now();
 
       // Step 2: Poll for completion with rich status
       let result: any = null;
-      let lastWorker = "";
       for (let i = 0; i < 300; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -135,23 +134,20 @@
         try {
           const taskResp = await fetch(`/api/tasks/${taskId}`);
           const task = await taskResp.json();
+          const profile = task.profile || selectedProfile;
 
           if (task.status === "running") {
-            if (task.workerUrl && task.workerUrl !== lastWorker) {
-              lastWorker = task.workerUrl;
-            }
-            const profile = task.profile || selectedProfile;
             if (elapsed < 5) {
-              statusText = `🔄 **${profile}** agent starting...`;
+              statusText = `🔄 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">agent starting...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             } else if (elapsed < 15) {
-              statusText = `🔍 **${profile}** agent working... (${elapsed}s)`;
+              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">searching & analyzing...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             } else if (elapsed < 30) {
-              statusText = `🔍 **${profile}** searching and analyzing... (${elapsed}s)`;
+              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">delegating to sub-agents...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             } else {
-              statusText = `🔍 **${profile}** working on complex task... (${elapsed}s)`;
+              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">working on complex task...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             }
           } else if (task.status === "queued") {
-            statusText = `⏳ Waiting for available worker... (${elapsed}s)`;
+            statusText = `⏳ <span class="text-muted-foreground">Waiting for available worker...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
           }
 
           if (task.status === "completed" || task.status === "failed") {
@@ -180,6 +176,7 @@
           error: result.error || "",
           model: result.model,
           inputTokens: result.inputTokens,
+          toolSteps: result.toolSteps || [],
           outputTokens: result.outputTokens,
         }),
       });
@@ -194,6 +191,7 @@
           inputTokens: completeData.assistantMessage.inputTokens || result.inputTokens,
           outputTokens: completeData.assistantMessage.outputTokens || result.outputTokens,
           createdAt: completeData.assistantMessage.createdAt,
+          toolCalls: (result.toolSteps || []).map((s: any) => ({ name: s.tool, arguments: {} })),
         },
       ];
 
@@ -333,8 +331,8 @@
                       <div class="h-2 w-2 animate-bounce rounded-full bg-primary" style="animation-delay: 0.3s"></div>
                     </div>
                     {#if statusText}
-                      <div class="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                        <Markdown content={statusText} class="[&_p]:my-0 [&_strong]:text-foreground" />
+                      <div class="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                        {@html statusText}
                       </div>
                     {/if}
                   </div>

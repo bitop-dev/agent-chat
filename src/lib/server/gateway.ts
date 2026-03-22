@@ -9,6 +9,12 @@ function headers(): Record<string, string> {
   return h;
 }
 
+export interface ToolStep {
+  tool: string;
+  result?: string;
+  error?: string;
+}
+
 export interface TaskResult {
   id: string;
   profile: string;
@@ -20,6 +26,7 @@ export interface TaskResult {
   outputTokens?: number;
   durationMs?: number;
   workerUrl?: string;
+  toolSteps?: ToolStep[];
 }
 
 export interface Agent {
