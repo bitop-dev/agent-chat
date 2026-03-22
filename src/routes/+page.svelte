@@ -5,6 +5,7 @@
   import ConversationList from "$lib/components/chat/ConversationList.svelte";
   import ChatMessage from "$lib/components/chat/ChatMessage.svelte";
   import ChatInput from "$lib/components/chat/ChatInput.svelte";
+  import Markdown from "$lib/components/chat/Markdown.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import SunIcon from "@lucide/svelte/icons/sun";
@@ -121,11 +122,12 @@
       ];
 
       const taskId = data.taskId;
-      statusText = "Task queued...";
+      statusText = `⏳ Task submitted to **${selectedProfile}**`;
       const startTime = Date.now();
 
-      // Step 2: Poll for completion
+      // Step 2: Poll for completion with rich status
       let result: any = null;
+      let lastWorker = "";
       for (let i = 0; i < 300; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -135,9 +137,21 @@
           const task = await taskResp.json();
 
           if (task.status === "running") {
-            statusText = `Agent working... (${elapsed}s)`;
+            if (task.workerUrl && task.workerUrl !== lastWorker) {
+              lastWorker = task.workerUrl;
+            }
+            const profile = task.profile || selectedProfile;
+            if (elapsed < 5) {
+              statusText = `🔄 **${profile}** agent starting...`;
+            } else if (elapsed < 15) {
+              statusText = `🔍 **${profile}** agent working... (${elapsed}s)`;
+            } else if (elapsed < 30) {
+              statusText = `🔍 **${profile}** searching and analyzing... (${elapsed}s)`;
+            } else {
+              statusText = `🔍 **${profile}** working on complex task... (${elapsed}s)`;
+            }
           } else if (task.status === "queued") {
-            statusText = `Waiting for worker... (${elapsed}s)`;
+            statusText = `⏳ Waiting for available worker... (${elapsed}s)`;
           }
 
           if (task.status === "completed" || task.status === "failed") {
@@ -312,24 +326,16 @@
                   >
                     <BotIcon class="h-4 w-4 animate-pulse" />
                   </div>
-                  <div class="flex flex-col gap-1">
+                  <div class="flex flex-col gap-2">
                     <div class="flex items-center gap-2">
-                      <div
-                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                      ></div>
-                      <div
-                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                        style="animation-delay: 0.1s"
-                      ></div>
-                      <div
-                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                        style="animation-delay: 0.2s"
-                      ></div>
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary"></div>
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary" style="animation-delay: 0.15s"></div>
+                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary" style="animation-delay: 0.3s"></div>
                     </div>
                     {#if statusText}
-                      <span class="text-xs text-muted-foreground animate-pulse">
-                        {statusText}
-                      </span>
+                      <div class="rounded-lg border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                        <Markdown content={statusText} class="[&_p]:my-0 [&_strong]:text-foreground" />
+                      </div>
                     {/if}
                   </div>
                 </div>

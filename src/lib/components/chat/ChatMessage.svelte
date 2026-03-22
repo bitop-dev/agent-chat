@@ -64,22 +64,22 @@
     <!-- Meta (assistant only) -->
     {#if !isUser}
       <div
-        class="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100"
+        class="flex items-center gap-2 mt-1"
       >
         {#if message.model}
-          <span class="text-[10px] text-muted-foreground font-mono"
-            >{message.model}</span
+          <Badge variant="outline" class="text-[10px] font-mono h-5"
+            >{message.model}</Badge
           >
         {/if}
         {#if message.inputTokens || message.outputTokens}
           <span class="text-[10px] text-muted-foreground">
-            {message.inputTokens}↑ {message.outputTokens}↓
+            {message.inputTokens?.toLocaleString()}↑ {message.outputTokens?.toLocaleString()}↓ tokens
           </span>
         {/if}
         <Button
           variant="ghost"
           size="sm"
-          class="h-6 w-6 p-0"
+          class="h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
           onclick={copyContent}
         >
           <CopyIcon class="h-3 w-3" />
