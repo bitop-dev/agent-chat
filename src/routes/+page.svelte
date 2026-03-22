@@ -27,6 +27,7 @@
   let messages = $state<Message[]>([]);
   let isLoading = $state(false);
   let statusText = $state("");
+  let taskEvents = $state<Array<{ type: string; tool: string; message: string; time: string }>>([]);
   let agents = $state<Agent[]>([]);
   let selectedProfile = $state("researcher");
   let messagesEndRef = $state<HTMLDivElement | null>(null);
@@ -125,29 +126,38 @@
       statusText = `<span class="text-muted-foreground">⏳ Task submitted to</span> <strong class="text-foreground">${selectedProfile}</strong>`;
       const startTime = Date.now();
 
-      // Step 2: Poll for completion with rich status
+      // Step 2: Poll for completion with real-time events
+      taskEvents = [];
       let result: any = null;
       for (let i = 0; i < 300; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
 
         try {
-          const taskResp = await fetch(`/api/tasks/${taskId}`);
+          const [taskResp, eventsResp] = await Promise.all([
+            fetch(`/api/tasks/${taskId}`),
+            fetch(`/api/tasks/${taskId}/events`),
+          ]);
           const task = await taskResp.json();
+          const eventsData = await eventsResp.json();
           const profile = task.profile || selectedProfile;
 
+          // Update live events
+          if (eventsData.events?.length > 0) {
+            taskEvents = eventsData.events;
+            scrollToBottom();
+          }
+
           if (task.status === "running") {
-            if (elapsed < 5) {
-              statusText = `🔄 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">agent starting...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
-            } else if (elapsed < 15) {
-              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">searching & analyzing...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
-            } else if (elapsed < 30) {
-              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">delegating to sub-agents...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
+            const lastEvent = taskEvents[taskEvents.length - 1];
+            if (lastEvent) {
+              const toolName = lastEvent.tool || lastEvent.type;
+              statusText = `🔍 <strong class="text-foreground">${profile}</strong> → <code class="text-xs">${toolName}</code> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             } else {
-              statusText = `🔍 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">working on complex task...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
+              statusText = `🔄 <strong class="text-foreground">${profile}</strong> <span class="text-muted-foreground">working...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
             }
           } else if (task.status === "queued") {
-            statusText = `⏳ <span class="text-muted-foreground">Waiting for available worker...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
+            statusText = `⏳ <span class="text-muted-foreground">Waiting for worker...</span> <span class="font-mono text-xs text-muted-foreground">${elapsed}s</span>`;
           }
 
           if (task.status === "completed" || task.status === "failed") {
@@ -204,6 +214,7 @@
     } finally {
       isLoading = false;
       statusText = "";
+      taskEvents = [];
     }
   }
 
@@ -324,15 +335,42 @@
                   >
                     <BotIcon class="h-4 w-4 animate-pulse" />
                   </div>
-                  <div class="flex flex-col gap-2">
-                    <div class="flex items-center gap-2">
-                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary"></div>
-                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary" style="animation-delay: 0.15s"></div>
-                      <div class="h-2 w-2 animate-bounce rounded-full bg-primary" style="animation-delay: 0.3s"></div>
-                    </div>
+                  <div class="flex flex-col gap-2 flex-1 max-w-[80%]">
                     {#if statusText}
                       <div class="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
                         {@html statusText}
+                      </div>
+                    {/if}
+                    <!-- Live event feed -->
+                    {#if taskEvents.length > 0}
+                      <div class="space-y-1">
+                        {#each taskEvents as event, i (i)}
+                          <div class="flex items-start gap-2 text-xs">
+                            {#if event.type === "tool_requested"}
+                              <span class="shrink-0 mt-0.5">
+                                <WrenchIcon class="h-3 w-3 text-blue-400" />
+                              </span>
+                              <span>
+                                <code class="rounded bg-blue-500/10 px-1 text-blue-400">{event.tool}</code>
+                              </span>
+                            {:else if event.type === "tool_finished"}
+                              <span class="shrink-0 mt-0.5 text-green-400">✓</span>
+                              <span class="text-muted-foreground truncate">
+                                {event.message?.substring(0, 80)}{event.message?.length > 80 ? '...' : ''}
+                              </span>
+                            {:else if event.type === "sub_agent"}
+                              <span class="shrink-0 mt-0.5">
+                                <BotIcon class="h-3 w-3 text-purple-400" />
+                              </span>
+                              <span class="text-purple-400">{event.message}</span>
+                            {:else if event.type === "turn_started" || event.type === "turn_finished"}
+                              <span class="text-muted-foreground/50">─</span>
+                              <span class="text-muted-foreground/50">{event.message}</span>
+                            {:else}
+                              <span class="text-muted-foreground">{event.message?.substring(0, 80)}</span>
+                            {/if}
+                          </div>
+                        {/each}
                       </div>
                     {/if}
                   </div>
