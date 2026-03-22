@@ -3,6 +3,7 @@
   import type { Message } from "$lib/stores";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
+  import Markdown from "./Markdown.svelte";
   import CopyIcon from "@lucide/svelte/icons/copy";
   import BotIcon from "@lucide/svelte/icons/bot";
   import UserIcon from "@lucide/svelte/icons/user";
@@ -53,7 +54,11 @@
           : "bg-muted text-foreground"
       )}
     >
-      <div class="whitespace-pre-wrap break-words">{message.content}</div>
+      {#if isUser}
+        <div class="whitespace-pre-wrap break-words">{message.content}</div>
+      {:else}
+        <Markdown content={message.content} />
+      {/if}
     </div>
 
     <!-- Meta (assistant only) -->

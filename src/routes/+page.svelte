@@ -10,6 +10,8 @@
   import SunIcon from "@lucide/svelte/icons/sun";
   import MoonIcon from "@lucide/svelte/icons/moon";
   import BotIcon from "@lucide/svelte/icons/bot";
+  import SearchIcon from "@lucide/svelte/icons/search";
+  import WrenchIcon from "@lucide/svelte/icons/wrench";
   import type { Conversation, Message } from "$lib/stores";
 
   interface Agent {
@@ -23,6 +25,7 @@
   let activeConvId = $state<string | null>(null);
   let messages = $state<Message[]>([]);
   let isLoading = $state(false);
+  let statusText = $state("");
   let agents = $state<Agent[]>([]);
   let selectedProfile = $state("researcher");
   let messagesEndRef = $state<HTMLDivElement | null>(null);
@@ -72,7 +75,6 @@
   }
 
   async function sendMessage(text: string) {
-    // Optimistic: add user message immediately
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -83,7 +85,10 @@
     scrollToBottom();
 
     isLoading = true;
+    statusText = "Submitting task...";
+
     try {
+      // Step 1: Submit (returns immediately with task ID)
       const resp = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -95,47 +100,98 @@
       });
       const data = await resp.json();
 
-      // Update conversation ID if new
-      if (!activeConvId && data.conversationId) {
-        activeConvId = data.conversationId;
+      if (data.error && data.assistantMessage) {
+        // Immediate error
+        if (!activeConvId && data.conversationId) activeConvId = data.conversationId;
+        messages = messages.filter((m) => m.id !== userMsg.id);
+        messages = [...messages,
+          { id: data.userMessage.id, role: "user", content: data.userMessage.content, createdAt: data.userMessage.createdAt },
+          { id: data.assistantMessage.id, role: "assistant", content: data.assistantMessage.content, createdAt: data.assistantMessage.createdAt },
+        ];
+        await loadConversations();
+        return;
       }
 
-      // Replace optimistic user message with real one and add assistant message
+      if (!activeConvId && data.conversationId) activeConvId = data.conversationId;
+
+      // Replace optimistic message with real user message
       messages = messages.filter((m) => m.id !== userMsg.id);
-      messages = [
-        ...messages,
+      messages = [...messages,
+        { id: data.userMessage.id, role: "user", content: data.userMessage.content, createdAt: data.userMessage.createdAt },
+      ];
+
+      const taskId = data.taskId;
+      statusText = "Task queued...";
+      const startTime = Date.now();
+
+      // Step 2: Poll for completion
+      let result: any = null;
+      for (let i = 0; i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+
+        try {
+          const taskResp = await fetch(`/api/tasks/${taskId}`);
+          const task = await taskResp.json();
+
+          if (task.status === "running") {
+            statusText = `Agent working... (${elapsed}s)`;
+          } else if (task.status === "queued") {
+            statusText = `Waiting for worker... (${elapsed}s)`;
+          }
+
+          if (task.status === "completed" || task.status === "failed") {
+            result = task;
+            break;
+          }
+        } catch {
+          // keep polling
+        }
+      }
+
+      if (!result) {
+        result = { output: "", error: "Task timed out", status: "timeout" };
+      }
+
+      statusText = "Saving response...";
+
+      // Step 3: Store the result
+      const completeResp = await fetch("/api/chat/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: activeConvId,
+          taskId,
+          output: result.output || "",
+          error: result.error || "",
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+        }),
+      });
+      const completeData = await completeResp.json();
+
+      messages = [...messages,
         {
-          id: data.userMessage.id,
-          role: "user",
-          content: data.userMessage.content,
-          createdAt: data.userMessage.createdAt,
-        },
-        {
-          id: data.assistantMessage.id,
-          role: "assistant",
-          content: data.assistantMessage.content,
-          model: data.assistantMessage.model || data.model,
-          inputTokens: data.assistantMessage.inputTokens || data.inputTokens,
-          outputTokens:
-            data.assistantMessage.outputTokens || data.outputTokens,
-          createdAt: data.assistantMessage.createdAt,
+          id: completeData.assistantMessage.id,
+          role: "assistant" as const,
+          content: completeData.assistantMessage.content,
+          model: completeData.assistantMessage.model || result.model,
+          inputTokens: completeData.assistantMessage.inputTokens || result.inputTokens,
+          outputTokens: completeData.assistantMessage.outputTokens || result.outputTokens,
+          createdAt: completeData.assistantMessage.createdAt,
         },
       ];
 
       await loadConversations();
       scrollToBottom();
     } catch (e: any) {
-      messages = [
-        ...messages,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: `Error: ${e.message}`,
-          createdAt: new Date().toISOString(),
-        },
+      messages = [...messages,
+        { id: crypto.randomUUID(), role: "assistant" as const, content: `Error: ${e.message}`, createdAt: new Date().toISOString() },
       ];
     } finally {
       isLoading = false;
+      statusText = "";
     }
   }
 
@@ -252,22 +308,29 @@
               {#if isLoading}
                 <div class="flex gap-3 px-4 py-4">
                   <div
-                    class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground"
+                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
                   >
-                    <BotIcon class="h-4 w-4" />
+                    <BotIcon class="h-4 w-4 animate-pulse" />
                   </div>
-                  <div class="flex items-center gap-1">
-                    <div
-                      class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                    ></div>
-                    <div
-                      class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                      style="animation-delay: 0.1s"
-                    ></div>
-                    <div
-                      class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
-                      style="animation-delay: 0.2s"
-                    ></div>
+                  <div class="flex flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                      <div
+                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
+                      ></div>
+                      <div
+                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
+                        style="animation-delay: 0.1s"
+                      ></div>
+                      <div
+                        class="h-2 w-2 animate-bounce rounded-full bg-muted-foreground"
+                        style="animation-delay: 0.2s"
+                      ></div>
+                    </div>
+                    {#if statusText}
+                      <span class="text-xs text-muted-foreground animate-pulse">
+                        {statusText}
+                      </span>
+                    {/if}
                   </div>
                 </div>
               {/if}

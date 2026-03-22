@@ -1,9 +1,10 @@
 import { json } from "@sveltejs/kit";
 import { db, conversations, messages } from "$lib/server/db";
 import { eq } from "drizzle-orm";
-import { submitTask, type TaskResult } from "$lib/server/gateway";
+import { submitTaskAsync } from "$lib/server/gateway";
 
-// POST /api/chat — send a message and get agent response
+// POST /api/chat — send a message, submit async task, return task ID
+// Frontend polls /api/tasks/:id for status and calls /api/chat/complete when done
 export async function POST({ request }) {
   const body = await request.json();
   const { conversationId, message: userMessage, profile } = body;
@@ -37,11 +38,16 @@ export async function POST({ request }) {
     })
     .returning();
 
-  // Submit to gateway
+  // Submit async task to gateway (returns immediately)
   const selectedProfile = profile || "researcher";
-  let result: TaskResult;
   try {
-    result = await submitTask(selectedProfile, userMessage);
+    const resp = await submitTaskAsync(selectedProfile, userMessage);
+    return json({
+      conversationId: convId,
+      userMessage: userMsg,
+      taskId: resp.id,
+      status: "submitted",
+    });
   } catch (e: any) {
     // Store error as assistant message
     const [errMsg] = await db
@@ -60,40 +66,4 @@ export async function POST({ request }) {
       error: e.message,
     });
   }
-
-  // Store assistant response
-  const [assistantMsg] = await db
-    .insert(messages)
-    .values({
-      conversationId: convId,
-      role: "assistant",
-      content: result.output || result.error || "(no response)",
-      model: result.model,
-      inputTokens: result.inputTokens,
-      outputTokens: result.outputTokens,
-    })
-    .returning();
-
-  // Update conversation title if first message
-  if (!conversationId) {
-    await db
-      .update(conversations)
-      .set({ updatedAt: new Date() })
-      .where(eq(conversations.id, convId));
-  } else {
-    await db
-      .update(conversations)
-      .set({ updatedAt: new Date() })
-      .where(eq(conversations.id, convId));
-  }
-
-  return json({
-    conversationId: convId,
-    userMessage: userMsg,
-    assistantMessage: assistantMsg,
-    taskId: result.id,
-    model: result.model,
-    inputTokens: result.inputTokens,
-    outputTokens: result.outputTokens,
-  });
 }
